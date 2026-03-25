@@ -9,10 +9,10 @@ public class Order {
     private static AtomicInteger counter = new AtomicInteger(0);
     private int id;
     private boolean vip;
-    private List<Dish> dishesOrdered;
-    private List<Dish> dishesGot;
+    private List<? extends Dish> dishesOrdered;
+    private List<? extends Dish> dishesGot;
 
-    public Order(boolean vip, List<Dish> dishesOrdered) {
+    public Order(boolean vip, List<? extends Dish> dishesOrdered) {
         id = counter.incrementAndGet();
         this.vip = vip;
         this.dishesOrdered = dishesOrdered;
@@ -26,15 +26,15 @@ public class Order {
         return vip;
     }
 
-    public List<Dish> getDishesOrdered() {
+    public List<? extends Dish> getDishesOrdered() {
         return dishesOrdered;
     }
 
-    public List<Dish> getDishesGot() {
+    public List<? extends Dish> getDishesGot() {
         return dishesGot;
     }
 
-    public void setDishedGot(List<Dish> dishesGot) {
+    public void setDishedGot(List<? extends Dish> dishesGot) {
         this.dishesGot = dishesGot;
     }
 

@@ -18,7 +18,7 @@ public class PizzaTask extends CookingTask<Pizza> {
     @Override
     public CompletableFuture<Pizza> start() {
         CompletableFuture<Pizza> future = makePizzaWithRetries(getDish(), retries, getOrderId());
-        setRunning(true);
+
         super.setFuture(future);
         return future;
     }
@@ -62,6 +62,9 @@ public class PizzaTask extends CookingTask<Pizza> {
 
     // TODO Здесь нужно сделать логику, когда задачу прервал вип поток, текущую задачу нужно будет сохранить в очередь на Kitchen
     private CompletableFuture<Pizza> bakePizza(Pizza pizza, Integer orderId) {
+
+        setRunning(true);
+
         return CompletableFuture.supplyAsync(() -> {
             if(Math.random() <= 0.7) {
                 throw new RuntimeException("[заказ %d]: ❌ Пицца '%s', id{%d} подгорела".formatted(orderId, pizza.getName(), pizza.getId()));

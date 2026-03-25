@@ -15,8 +15,6 @@ public class DessertTask extends CookingTask<Dessert> {
     @Override
     public CompletableFuture<Dessert> start() {
         CompletableFuture<Dessert> future = makeDessert(getDish(), getOrderId());
-
-        setRunning(true);
         super.setFuture(future);
         return future;
     }
@@ -31,7 +29,7 @@ public class DessertTask extends CookingTask<Dessert> {
     }
 
     private CompletableFuture<Dessert> makeDessert(Dessert dessert, Integer orderId) {
-
+        setRunning(true);
         return CompletableFuture.supplyAsync(() -> {
             try {
                 System.out.printf("%n[заказ %d]: Начали готовить десерт '%s', id{%d} %n", orderId, dessert.getName(), dessert.getId());

@@ -16,7 +16,6 @@ public class DrinkTask extends CookingTask<Drink> {
     public CompletableFuture<Drink> start() {
         CompletableFuture<Drink> future = makeDrink(getDish(), getOrderId());
 
-        setRunning(true);
         super.setFuture(future);
         return future;
     }
@@ -31,6 +30,8 @@ public class DrinkTask extends CookingTask<Drink> {
     }
 
     private CompletableFuture<Drink> makeDrink(Drink drink, Integer orderId) {
+
+        setRunning(true);
 
         return CompletableFuture.supplyAsync(() -> {
             try {

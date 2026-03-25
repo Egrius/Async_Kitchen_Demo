@@ -1,7 +1,13 @@
 package org.example;
 
+import org.example.dish.Dessert;
 import org.example.dish.Dish;
+import org.example.dish.Drink;
+import org.example.dish.Pizza;
 import org.example.task.CookingTask;
+import org.example.task.DessertTask;
+import org.example.task.DrinkTask;
+import org.example.task.PizzaTask;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -18,7 +24,6 @@ public class KitchenService {
 
     private static volatile KitchenService INSTANCE = null;
 
-
     private static final ExecutorService ovenPool = Executors.newFixedThreadPool(2);
     private static final ExecutorService drinkPool = Executors.newSingleThreadExecutor();
     private static final ExecutorService dessertPool = Executors.newSingleThreadExecutor();
@@ -26,9 +31,9 @@ public class KitchenService {
     /*
         Здесь хранятся все выполняющиеся задачи, благодаря чему можно прерывать выполняющиеся и всунуть випа
      */
-    private static Map<Integer, List<CookingTask>> runningTasks = new ConcurrentHashMap<>();
+    private static final Map<Order, List<CookingTask<? extends Dish>>> runningTasks = new ConcurrentHashMap<>();
 
-    private PriorityBlockingQueue<CookingTask> canceledTasks = new PriorityBlockingQueue<>(100, Comparator.comparing(CookingTask::getOrderId));
+    private static final PriorityBlockingQueue<CookingTask<? extends Dish>> canceledTasks = new PriorityBlockingQueue<>(100, Comparator.comparing(CookingTask::getOrderId));
 
     public static KitchenService getInstance() {
         if(INSTANCE == null) {
@@ -39,9 +44,7 @@ public class KitchenService {
         return INSTANCE;
     }
 
-    private KitchenService() {
-
-    }
+    private KitchenService() { }
 
     public CompletableFuture<Order> acceptOrder(Order order) {
          /* КАК ПРИНИМАЕМ ЗАКАЗ:
@@ -61,58 +64,81 @@ public class KitchenService {
             забрать фьчеры и ждать allof
          */
 
-//        List<Dish> orderedDishes = order.getDishesOrdered();
-//
-//        System.out.printf("%n --- Заказ %d принят на кухню! (всего блюд: %d) ---", order.getId(), orderedDishes.size());
-//
-//        List<CompletableFuture<Dish>> currentOrderAllFutures = new ArrayList<>();
-//
-//        orderedDishes.forEach(dish -> {
-//                    int orderId = order.getId();
-//                    boolean isVip = order.isVip();
-//                    switch (dish.getType()) {
-//                        case PIZZA -> {
-//                            System.out.println("-- [заказ "
-//                                    + orderId
-//                                    + "]: Пицца '" + dish.getName() + "' добавляется в очередь на обработку");
-//
-//                            CookingTask task = new CookingTask(makePizzaWithRetries(dish, 2, orderId), dish, orderId, ovenPool, isVip);
-//                            // добавить в мапу ЗДЕСЬ!
-//                            runningTasks.computeIfAbsent(orderId, k -> new ArrayList<>()).add(task);
-//                            currentOrderAllFutures.add(task.getFuture());
-//                        }
-//                        case DRINK -> {
-//                            System.out.println("-- [заказ "
-//                                    + orderId
-//                                    + "]: Напиток '" + dish.getName() + "' добавляется в очередь на обработку");
-//
-//                            CookingTask task = new CookingTask(makeDrink(dish, orderId), dish, orderId, drinkPool, isVip);
-//                            runningTasks.computeIfAbsent(orderId, k -> new ArrayList<>()).add(task);
-//                            currentOrderAllFutures.add(task.getFuture());
-//                        }
-//                        case DESSERT -> {
-//
-//                            System.out.println("-- [заказ "
-//                                    + orderId
-//                                    + "]: Дессерт '" + dish.getName() + "' добавляется в очередь на обработку");
-//
-//                            CookingTask task = new CookingTask(makeDessert(dish, orderId), dish, orderId, dessertPool, isVip);
-//                            runningTasks.computeIfAbsent(orderId, k -> new ArrayList<>()).add(task);
-//                            currentOrderAllFutures.add(task.getFuture());
-//                        }
-//                    };
-//                }
-//        );
-//
-//        return CompletableFuture.allOf(currentOrderAllFutures.toArray(new CompletableFuture[0]))
-//                .thenApply(v -> {
-//                    List<Dish> readyDishes = currentOrderAllFutures.stream()
-//                            .map(CompletableFuture::join)
-//                            .filter(Dish::isReady)
-//                            .toList();
-//                    order.setDishedGot(readyDishes);
-//                    return order;
-//                });
+        List<CookingTask<? extends Dish>> tasks = new ArrayList<>();
+
+        // Для каждого блюда своя задача идет в общий пул задач orderId -> tasks
+        order.getDishesOrdered().forEach( d -> {
+                    int orderId = order.getId();
+                    boolean isVip = order.isVip();
+                    switch (d.getType()) {
+                        case DRINK -> {
+                            tasks.add(new DrinkTask((Drink) d, orderId, drinkPool, isVip));
+                        }
+                        case DESSERT -> {
+                            tasks.add(new DessertTask((Dessert) d, orderId, dessertPool, isVip));
+                        }
+                        case PIZZA -> {
+                            tasks.add(new PizzaTask((Pizza) d, orderId, ovenPool, isVip, 2));
+                        }
+                    }
+                }
+        );
+
+        // Продумать как раскидать таски так чтобы втиснуть все отдельные с випа
+
+        if(order.isVip()) {
+            System.out.println("*** ПРИШЕЛ VIP ***");
+
+            for(CookingTask<? extends Dish> task : tasks) {
+                if(task.getDish().getType() == DishType.PIZZA) {
+                    synchronized (ovenPool) {
+                        // посмотреть сколько сейчас запущенных, т.е которые сейчас в пуле
+                        long countTakenPlacesOvenPool = countOvenPool(order);
+
+                        if(countTakenPlacesOvenPool >= 2) {
+                            findAndCancelTask(DishType.PIZZA);
+                        }
+                    }
+                }
+            }
+        }
+
+        // закинули задачи в мапу
+        runningTasks.put(order, tasks);
+
+        // Запуск задач по той же ссылке, но не через map.get()
+        CompletableFuture<?>[] allFutures = tasks.stream()
+                .map(CookingTask::start)
+                .toArray(CompletableFuture[]::new);
+
+        // Ждать выполнения фьючеров всех задач
+        // После чего нужно вернуть собранный заказ
+        return CompletableFuture.allOf(allFutures)
+                .thenApply(v -> {
+                    List<Dish> completedDishes = tasks.stream()
+                            .map(task -> {
+                                CompletableFuture<?> future = task.getFuture();
+                                return (Dish) future.join();
+                            })
+                            .filter(Dish::isReady)
+                            .toList();
+
+                    order.setDishedGot(completedDishes);
+                    return order;
+                })
+                .whenComplete((res, ex) -> runningTasks.remove(order.getId()));
+    }
+
+    private long countOvenPool(Order currentOrder) {
+        synchronized (runningTasks) {
+
+            return runningTasks.entrySet().stream()
+                    .filter(e -> e.getKey() != currentOrder) // исключаем текущий заказ
+                    .flatMap(e -> e.getValue().stream())
+                    .filter(t -> t.getDish().getType() == DishType.PIZZA)
+                    .filter(CookingTask::isRunning)
+                    .count();
+        }
     }
 
     private boolean hasFreeSlot(DishType dishType) {
@@ -129,13 +155,14 @@ public class KitchenService {
     }
 
     private void findAndCancelTask(DishType type) {
-        for (List<CookingTask> tasks : runningTasks.values()) {
-            Optional<CookingTask> task = tasks.stream()
+        for (List<CookingTask<? extends Dish>> tasks : runningTasks.values()) {
+            Optional<CookingTask<? extends Dish>> task = tasks.stream()
                     .filter(t -> t.getDish().getType() == type)
                     .filter(CookingTask::isRunning)
                     .findFirst();
+
             if (task.isPresent()) {
-                CookingTask taskGot = task.get();
+                CookingTask<? extends Dish> taskGot = task.get();
                 taskGot.cancel();
                 canceledTasks.add(taskGot);
                 break;
