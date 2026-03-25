@@ -1,6 +1,8 @@
 package org.example;
 
 
+import org.example.dish.Dish;
+
 import java.util.Map;
 
 public class MenuService {

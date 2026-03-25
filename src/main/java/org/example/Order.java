@@ -1,5 +1,7 @@
 package org.example;
 
+import org.example.dish.Dish;
+
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 

@@ -1,6 +1,7 @@
 package org.example;
 
-import java.util.Comparator;
+import org.example.dish.Dish;
+
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
