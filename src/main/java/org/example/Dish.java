@@ -1,5 +1,6 @@
 package org.example;
 
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class Dish {
@@ -39,6 +40,18 @@ public class Dish {
 
     public int getId() {
         return id;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof Dish dish)) return false;
+        return getId() == dish.getId() && getCookingTime() == dish.getCookingTime() && getType() == dish.getType() && Objects.equals(getName(), dish.getName());
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(getId(), getType(), getName(), getCookingTime());
     }
 
     @Override

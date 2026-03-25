@@ -1,5 +1,6 @@
 package org.example;
 
+import java.util.Comparator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
@@ -12,7 +13,16 @@ public class OrderService {
 
     private static final AtomicInteger counter = new AtomicInteger(0);
     private static final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
-    private static final BlockingQueue<Order> incomingOrders = new LinkedBlockingQueue<>();
+
+    private static final PriorityBlockingQueue<Order> incomingOrders = new PriorityBlockingQueue<>(100,
+            (o1, o2) -> {
+        if(o1.isVip() && o2.isVip()) return 0;
+        if (o1.isVip() && !o2.isVip()) return -1;
+        if (!o1.isVip() && o2.isVip()) return 1;
+        return 0;
+    });
+
+
     private final KitchenService kitchenService = KitchenService.getInstance();
 
     private final Object lock = new Object();
@@ -23,7 +33,6 @@ public class OrderService {
         // либо оставить так, что каждые 3 секунды следующий
 
         // Принято решение сделать снимком
-
         scheduler.scheduleWithFixedDelay(() -> {
             Queue<Order> snapshot = getSnapshot();
             snapshot.forEach(order -> {
@@ -51,6 +60,9 @@ public class OrderService {
     // Сборка заказа на основе переданных блюд
     public Order compileOrder(List<Dish> dishes, boolean isVip) {
         Order newOrder = new Order(isVip, dishes);
+        if(isVip) {
+            incomingOrders.add(newOrder);
+        }
         incomingOrders.add(newOrder);
         return newOrder;
     }
