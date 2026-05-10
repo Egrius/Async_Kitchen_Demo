@@ -17,12 +17,13 @@ public class DrinkTask extends CookingTask<Drink> {
         isStarted = true;
         CompletableFuture<Drink> future = makeDrink(getDish(), getOrderId());
 
-        setRunning(true);
         super.setFuture(future);
         return future;
     }
 
     private CompletableFuture<Drink> makeDrink(Drink drink, Integer orderId) {
+
+        setRunning(true);
 
         return CompletableFuture.supplyAsync(() -> {
             try {
