@@ -16,6 +16,7 @@ public abstract class CookingTask <T extends Dish> {
     private volatile CompletableFuture<T> future; // теперь не final
     private volatile boolean isRunning;
     private volatile boolean isInterrupted;
+    protected volatile boolean isStarted;
 
     public CookingTask(T dish, int orderId, ExecutorService assignedPool, boolean isVip) {
         this.dish = dish;
@@ -25,7 +26,6 @@ public abstract class CookingTask <T extends Dish> {
     }
 
     public abstract CompletableFuture<T> start(); // здесь создается future и запускается задача
-    public abstract  CompletableFuture<T> resume(); // здесь пересоздается future
 
     public void cancel() {
         this.isInterrupted = true;
@@ -71,5 +71,9 @@ public abstract class CookingTask <T extends Dish> {
 
     public void setInterrupted(boolean interrupted) {
         isInterrupted = interrupted;
+    }
+
+    public boolean isStarted() {
+        return isStarted;
     }
 }

@@ -11,17 +11,19 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class OrderService {
 
     private static volatile OrderService INSTANCE = null;
+    private final int SNAPSHOT_SIZE = 5;
 
     private static final AtomicInteger counter = new AtomicInteger(0);
     private static final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
 
-    private static final PriorityBlockingQueue<Order> incomingOrders = new PriorityBlockingQueue<>(100,
-            (o1, o2) -> {
-        if(o1.isVip() && o2.isVip()) return 0;
-        if (o1.isVip() && !o2.isVip()) return -1;
-        if (!o1.isVip() && o2.isVip()) return 1;
-        return 0;
-    });
+    private static final PriorityBlockingQueue<Order> incomingOrders =
+            new PriorityBlockingQueue<>(100,
+                (o1, o2) -> {
+                    if(o1.isVip() && o2.isVip()) return 0;
+                    if (o1.isVip() && !o2.isVip()) return -1;
+                    if (!o1.isVip() && o2.isVip()) return 1;
+                    return 0;
+                });
 
 
     private final KitchenService kitchenService = KitchenService.getInstance();
@@ -30,23 +32,25 @@ public class OrderService {
 
     private OrderService() {
         // Запуск шедулера на просмотр очереди
-        // Возможно стоит добавить взятие всей имеющейся очереди,
-        // либо оставить так, что каждые 3 секунды следующий
-
         // Принято решение сделать снимком
+
         scheduler.scheduleWithFixedDelay(() -> {
-            Queue<Order> snapshot = getSnapshot();
-            snapshot.forEach(order -> {
-                kitchenService.acceptOrder(order)
-                        .thenAccept(readyOrder ->
-                                System.out.println("\n✅ Заказ " + readyOrder.getId() + " готов!")
-                        )
-                        .exceptionally(e -> {
-                            System.out.println("\n⛔ Заказ " + order.getId() + " не выполнен: " + e.getMessage());
-                            return null;
-                        });
-            });
-        }, 3, 5, TimeUnit.SECONDS);
+            try{
+                System.out.println("[ORDER SERVICE]: вызван шедуллер");
+                Queue<Order> snapshot = getSnapshot();
+                snapshot.forEach(order -> {
+                    kitchenService.acceptOrder(order)
+                            .thenAccept(readyOrder -> System.out.println("\n✅ Заказ " + readyOrder.getId() + " готов!"))
+                            .exceptionally(e -> {
+                                System.out.println("\n⛔ Заказ " + order.getId() + " не выполнен: " + e.getMessage());
+                                return null;
+                            });
+                });
+            } catch (Exception e) {
+                System.err.println("Ошибка в шедулере OrderService: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }, 3, 4, TimeUnit.SECONDS);
     }
 
     public static OrderService getInstance() {
@@ -61,9 +65,7 @@ public class OrderService {
     // Сборка заказа на основе переданных блюд
     public Order compileOrder(List<Dish> dishes, boolean isVip) {
         Order newOrder = new Order(isVip, dishes);
-        if(isVip) {
-            incomingOrders.add(newOrder);
-        }
+
         incomingOrders.add(newOrder);
         return newOrder;
     }
@@ -73,14 +75,12 @@ public class OrderService {
         Queue<Order> snapshot = new LinkedList<>();
         System.out.println("[СИСТЕМА]: ГОТОВИМСЯ К СНИМКУ ОЧЕРЕДИ, ТЕКУЩИЙ РАЗМЕР ОЧЕРЕДИ: " + incomingOrders.size());
 
-        synchronized (lock) { // Возможно излишне, шедулер один
-            int size = incomingOrders.size();
+        int elementsToTake = Math.min(SNAPSHOT_SIZE, incomingOrders.size());
 
-            for(int i = 0; i < size; i++) {
-
-                snapshot.add(incomingOrders.poll());
-            }
+        for(int i = 0; i < elementsToTake; i++) {
+            snapshot.add(incomingOrders.poll());
         }
+
         System.out.println("[СИСТЕМА]: СДЕЛАН СНИМОК ОЧЕРЕДИ - " + snapshot);
         return snapshot;
     }

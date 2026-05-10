@@ -10,7 +10,7 @@ public class Order {
     private int id;
     private boolean vip;
     private List<Dish> dishesOrdered;
-    private List<Dish> dishesGot;
+    private List<? extends Dish> dishesGot;
 
     public Order(boolean vip, List<Dish> dishesOrdered) {
         id = counter.incrementAndGet();
@@ -30,11 +30,11 @@ public class Order {
         return dishesOrdered;
     }
 
-    public List<Dish> getDishesGot() {
+    public List<? extends Dish> getDishesGot() {
         return dishesGot;
     }
 
-    public void setDishedGot(List<Dish> dishesGot) {
+    public void setDishedGot(List<? extends Dish> dishesGot) {
         this.dishesGot = dishesGot;
     }
 

@@ -14,20 +14,12 @@ public class DrinkTask extends CookingTask<Drink> {
 
     @Override
     public CompletableFuture<Drink> start() {
+        isStarted = true;
         CompletableFuture<Drink> future = makeDrink(getDish(), getOrderId());
 
         setRunning(true);
         super.setFuture(future);
         return future;
-    }
-
-    @Override
-    public CompletableFuture<Drink> resume() {
-        if(isInterrupted()) {
-            setInterrupted(false);
-            return start();
-        }
-        return CompletableFuture.failedFuture(new IllegalStateException("Task is not interrupted"));
     }
 
     private CompletableFuture<Drink> makeDrink(Drink drink, Integer orderId) {

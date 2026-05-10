@@ -6,6 +6,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
+/*
+Проблемы, которые были:
+
+- Шедуллер orderService вызывался только один раз, возможная причина - жесткое ограничение очереди в 5 элементов - клались null
+
+ */
+
 public class App 
 {
     public static void main( String[] args ) throws InterruptedException {
@@ -17,7 +24,7 @@ public class App
         List<Thread> threads = new ArrayList<>();
         List<Thread> clientThreads = new ArrayList<>();
 
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 8; i++) {
 
             try {
                 Thread.sleep(2000);
@@ -36,7 +43,7 @@ public class App
                     dishes.add(menuService.selectFromMenu(dish));
                 }
 
-                boolean isVip = Math.random() <= 0.2; // 20% випов
+                boolean isVip = Math.random() <= 0.5; // 20% випов
 
                 Order compiled = orderService.compileOrder(dishes,isVip);
                 System.out.println("\n --------------------\n[ Заказ "
@@ -68,7 +75,5 @@ public class App
         Thread.sleep(30000);
         kitchen.shutdown();
         orderService.shutdown();
-
-
     }
 }
