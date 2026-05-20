@@ -6,12 +6,10 @@ import org.example.task.DessertTask;
 import org.example.task.DrinkTask;
 import org.example.task.PizzaTask;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
-import java.util.stream.Stream;
 
 // VIP-заказы должны прерывать уже текущие обычные и забирать их пул, затем пул продолжает выполнять прошлую задачу.
 // Нужно продумать отмену задач и также их возобновление при отмене.
@@ -40,6 +38,15 @@ public class KitchenService {
 
     private static final ScheduledExecutorService dispatcher = new ScheduledThreadPoolExecutor(1);
 
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+
+    private static final String RESET = "\u001B[0m";
+    private static final String GREEN = "\u001B[32m";
+    private static final String RED = "\u001B[31m";
+    private static final String YELLOW = "\u001B[33m";
+    private static final String PURPLE = "\u001B[35m";
+    private static final String CYAN = "\u001B[36m";
+
     public static KitchenService getInstance() {
         if(INSTANCE == null) {
             synchronized (KitchenService.class) {
@@ -59,10 +66,19 @@ public class KitchenService {
 
     private Runnable runCookingTasks() {
         return () -> {
-            System.out.println("[DISPATCHER]: тик");
+
+            String time = LocalDateTime.now().format(TIME_FORMATTER);
+            System.out.printf("%s%s🔄 [DISPATCHER_TICK] Проверка очередей...%s%n", PURPLE, time, RESET);
+
+            // Восстановление отменённых задач
             CookingTask<?> cancelledTask = recoveryQueue.poll();
             while (cancelledTask != null) {
                 if (hasFreeOvenSlot() && !cancelledTask.isRunning()) {
+
+                    System.out.printf("%s%s♻️ [RECOVERY] Восстановление задачи | Заказ #%d | Тип: %s%s%n",
+                            PURPLE, time, cancelledTask.getOrderId(),
+                            cancelledTask.getDish().getType(), RESET);
+
                     cancelledTask.start();
                 } else {
                     recoveryQueue.offer(cancelledTask);
@@ -85,9 +101,21 @@ public class KitchenService {
                                     for(Map.Entry<Integer, List<CookingTask<? extends Dish>>> runnings : runningTasks.entrySet()) {
                                         runnings.getValue().stream()
                                                 .filter(t -> t.isRunning() && t.getDish().getType() == DishType.PIZZA && !t.isVip())
-                                                .peek(CookingTask::cancel)
+                                                .peek(t -> {
+
+                                                    System.out.printf("%s%s⚡ [VIP_PREEMPT] VIP заказ #%d прервал задачу заказа #%d (Пицца '%s')%s%n",
+                                                            YELLOW, time, task.getOrderId(), t.getOrderId(), t.getDish().getName(), RESET);
+
+                                                    t.cancel();
+                                                })
                                                 .findFirst()
-                                                .ifPresent(a -> recoveryQueue.add(a)); // добавил в recoveryQueue
+                                                .ifPresent(a -> {
+
+                                                    System.out.printf("%s%s❌ [CANCEL] Отмена задачи | Заказ #%d | Причина: вытеснение VIP%s%n",
+                                                            RED, time, a.getOrderId(), RESET);
+
+                                                    recoveryQueue.add(a);
+                                                }); // добавил в recoveryQueue
                                     }
                                     vipPizzaTask.start();
                                 }
@@ -106,23 +134,31 @@ public class KitchenService {
     // Суть этого метода - сгенерировать задачи и закинуть их в мапу, проверкой статусов и вытеснением уже занимается dispatcher
     public CompletableFuture<Order> acceptOrder(Order order) {
 
-        System.out.printf("%n --- Заказ %d принят на кухню! (всего блюд: %d) ---",
-                order.getId(), order.getDishesOrdered().size());
+        String time = LocalDateTime.now().format(TIME_FORMATTER);
+        String vipStatus = order.isVip() ? "VIP: да" : "VIP: нет";
+        System.out.printf("%s%s🍳 [ORDER_ACCEPTED] Заказ #%d | %s | блюд: %d%s%n",
+                CYAN, time, order.getId(), vipStatus, order.getDishesOrdered().size(), RESET);
 
         generateCookingTasks(order);
 
         List<CookingTask<?>> currentOrderAllTasks = runningTasks.get(order.getId());
+
+        System.out.printf("%s%s⏳ [WAIT_START] Заказ #%d | Ожидание запуска всех задач...%s%n",
+                CYAN, time, order.getId(), RESET);
 
         while (currentOrderAllTasks.stream().anyMatch(t -> !t.isStarted())) {
             try {
                 Thread.sleep(10); // небольшая задержка
 
             } catch (InterruptedException e) {
+
                 Thread.currentThread().interrupt();
                 throw new RuntimeException(e);
             }
         }
 
+        System.out.printf("%s%s🚀 [ALL_TASKS_STARTED] Заказ #%d | Готово к allOf%s%n",
+                GREEN, time, order.getId(), RESET);
 
         CompletableFuture<?>[] futuresArray  = currentOrderAllTasks.stream()
                 .map(CookingTask::getFuture)
@@ -145,36 +181,35 @@ public class KitchenService {
         int orderId = order.getId();
         boolean isVip = order.isVip();
 
+        String time = LocalDateTime.now().format(TIME_FORMATTER);
+
         for(Dish dish : order.getDishesOrdered()) {
             switch (dish.getType()) {
                 case PIZZA -> {
-                    System.out.println("-- [заказ "
-                            + orderId
-                            + "]: Пицца '" + dish.getName() + "' добавляется в очередь на обработку");
+                    System.out.printf("%s%s➕ [TASK_CREATED] Заказ #%d | Тип: PIZZA | Блюдо: '%s'%s%n",
+                            CYAN, time, orderId, dish.getName(), RESET);
 
                     PizzaTask task = new PizzaTask((Pizza)dish, orderId, ovenPool, isVip, PIZZA_RETRIES);
                     runningTasks.computeIfAbsent(orderId, k -> new ArrayList<>()).add(task);
                    // currentOrderAllFutures.add(task.getFuture());
                 }
                 case DRINK -> {
-                    System.out.println("-- [заказ "
-                            + orderId
-                            + "]: Напиток '" + dish.getName() + "' добавляется в очередь на обработку");
+                    System.out.printf("%s%s➕ [TASK_CREATED] Заказ #%d | Тип: DRINK | Блюдо: '%s'%s%n",
+                            CYAN, time, orderId, dish.getName(), RESET);
 
                     DrinkTask task = new DrinkTask((Drink) dish, orderId, drinkPool, isVip);
                     runningTasks.computeIfAbsent(orderId, k -> new ArrayList<>()).add(task);
                     //currentOrderAllFutures.add(task.getFuture());
                 }
                 case DESSERT -> {
-                    System.out.println("-- [заказ "
-                            + orderId
-                            + "]: Дессерт '" + dish.getName() + "' добавляется в очередь на обработку");
+                    System.out.printf("%s%s➕ [TASK_CREATED] Заказ #%d | Тип: DESSERT | Блюдо: '%s'%s%n",
+                            CYAN, time, orderId, dish.getName(), RESET);
 
                     DessertTask task = new DessertTask((Dessert) dish, orderId, dessertPool, isVip);
                     runningTasks.computeIfAbsent(orderId, k -> new ArrayList<>()).add(task);
                    // currentOrderAllFutures.add(task.getFuture());
                 }
-            };
+            }
         }
     }
 
@@ -191,7 +226,8 @@ public class KitchenService {
     }
 
     public void shutdown() {
-        System.out.println("\n КУХНЯ ЗАКРЫВАЕТСЯ \n");
+        String time = LocalDateTime.now().format(TIME_FORMATTER);
+        System.out.printf("%s%s🔒 [SHUTDOWN] Кухня закрывается...%s%n", RED, time, RESET);
 
         ovenPool.shutdown();
         drinkPool.shutdown();
@@ -208,7 +244,7 @@ public class KitchenService {
             throw new RuntimeException(e);
         }
 
-        System.out.println("Кухня закрыта");
+        System.out.printf("%s%s✅ [SHUTDOWN] Кухня закрыта%s%n", GREEN, time, RESET);
     }
 
 }

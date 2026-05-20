@@ -1,13 +1,19 @@
 package org.example.task;
 
 import org.example.dish.Dessert;
-import org.example.dish.Dish;
-import org.example.dish.Drink;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 public class DessertTask extends CookingTask<Dessert> {
+
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+    private static final String RESET = "\u001B[0m";
+    private static final String GREEN = "\u001B[32m";
+    private static final String BLUE = "\u001B[34m";
+
     public DessertTask(Dessert dish, int orderId, ExecutorService assignedPool, boolean isVip) {
         super(dish, orderId, assignedPool, isVip);
     }
@@ -15,6 +21,9 @@ public class DessertTask extends CookingTask<Dessert> {
     @Override
     public CompletableFuture<Dessert> start() {
         isStarted = true;
+        String time = LocalDateTime.now().format(TIME_FORMATTER);
+        System.out.printf("%s%s🍰 [DESSERT_START] Заказ #%d | Десерт '%s' id{%d}%s%n",
+                BLUE, time, getOrderId(), getDish().getName(), getDish().getId(), RESET);
         CompletableFuture<Dessert> future = makeDessert(getDish(), getOrderId());
         super.setFuture(future);
         return future;
@@ -24,10 +33,11 @@ public class DessertTask extends CookingTask<Dessert> {
         setRunning(true);
         return CompletableFuture.supplyAsync(() -> {
             try {
-                System.out.printf("%n[заказ %d]: Начали готовить десерт '%s', id{%d} %n", orderId, dessert.getName(), dessert.getId());
                 Thread.sleep(1000);
-                System.out.printf("%n[заказ %d]: десерт '%s', ГОТОВ id{%d} %n", orderId, dessert.getName(), dessert.getId());
                 dessert.setReady(true);
+                String time = LocalDateTime.now().format(TIME_FORMATTER);
+                System.out.printf("%s%s✨ [DESSERT_DONE] Заказ #%d | Десерт '%s' id{%d} готов (1 сек)%s%n",
+                        GREEN, time, orderId, dessert.getName(), dessert.getId(), RESET);
                 return dessert;
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);

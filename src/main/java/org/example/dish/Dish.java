@@ -4,6 +4,7 @@ import org.example.DishType;
 
 import java.util.concurrent.atomic.AtomicInteger;
 
+
 public abstract class Dish {
     private static AtomicInteger counter = new AtomicInteger(0);
     private final int id;

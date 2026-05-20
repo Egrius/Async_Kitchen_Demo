@@ -1,13 +1,19 @@
 package org.example.task;
 
-import org.example.dish.Dish;
 import org.example.dish.Drink;
-import org.example.dish.Pizza;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 
 public class DrinkTask extends CookingTask<Drink> {
+
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+    private static final String RESET = "\u001B[0m";
+    private static final String GREEN = "\u001B[32m";
+    private static final String BLUE = "\u001B[34m";
+
     public DrinkTask(Drink drink, int orderId, ExecutorService assignedPool, boolean isVip) {
         super(drink, orderId, assignedPool, isVip);
     }
@@ -15,27 +21,27 @@ public class DrinkTask extends CookingTask<Drink> {
     @Override
     public CompletableFuture<Drink> start() {
         isStarted = true;
+        String time = LocalDateTime.now().format(TIME_FORMATTER);
+        System.out.printf("%s%s🥤 [DRINK_START] Заказ #%d | Напиток '%s' id{%d}%s%n",
+                BLUE, time, getOrderId(), getDish().getName(), getDish().getId(), RESET);
         CompletableFuture<Drink> future = makeDrink(getDish(), getOrderId());
-
         super.setFuture(future);
         return future;
     }
 
     private CompletableFuture<Drink> makeDrink(Drink drink, Integer orderId) {
-
         setRunning(true);
-
         return CompletableFuture.supplyAsync(() -> {
             try {
-                System.out.printf("%n[заказ %d]: Начали готовить напиток '%s', id{%d} %n", orderId, drink.getName(), drink.getId());
                 Thread.sleep(1000);
-                System.out.printf("%n[заказ %d]: напиток '%s', ГОТОВ id{%d} %n", orderId, drink.getName(), drink.getId());
                 drink.setReady(true);
+                String time = LocalDateTime.now().format(TIME_FORMATTER);
+                System.out.printf("%s%s✨ [DRINK_DONE] Заказ #%d | Напиток '%s' id{%d} готов (1 сек)%s%n",
+                        GREEN, time, orderId, drink.getName(), drink.getId(), RESET);
                 return drink;
             } catch (InterruptedException e) {
                 throw new RuntimeException(e);
             }
         }, getAssignedPool());
     }
-
 }

@@ -2,6 +2,8 @@ package org.example;
 
 import org.example.dish.Dish;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
@@ -20,15 +22,21 @@ public class OrderService {
             new PriorityBlockingQueue<>(100,
                 (o1, o2) -> {
                     if(o1.isVip() && o2.isVip()) return 0;
-                    if (o1.isVip() && !o2.isVip()) return -1;
-                    if (!o1.isVip() && o2.isVip()) return 1;
-                    return 0;
+                    else if (o1.isVip() && !o2.isVip()) return -1;
+                    else if (!o1.isVip() && o2.isVip()) return 1;
+                    else return Integer.compare(o1.getId(), o2.getId());
                 });
 
 
     private final KitchenService kitchenService = KitchenService.getInstance();
 
-    private final Object lock = new Object();
+    private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");
+
+    private static final String RESET = "\u001B[0m";
+    private static final String CYAN = "\u001B[36m";
+    private static final String GREEN = "\u001B[32m";
+    private static final String YELLOW = "\u001B[33m";
+    private static final String BLUE = "\u001B[34m";
 
     private OrderService() {
         // Запуск шедулера на просмотр очереди
@@ -36,13 +44,26 @@ public class OrderService {
 
         scheduler.scheduleWithFixedDelay(() -> {
             try{
-                System.out.println("[ORDER SERVICE]: вызван шедуллер");
+
+                String time = LocalDateTime.now().format(TIME_FORMATTER);
+                System.out.printf("%s%s🎬 [SCHEDULER_BEFORE_SNAPSHOT_TICK] Заказов в очереди: %d%s%n",
+                        CYAN, time, incomingOrders.size(), RESET);
+
                 Queue<Order> snapshot = getSnapshot();
+
                 snapshot.forEach(order -> {
                     kitchenService.acceptOrder(order)
-                            .thenAccept(readyOrder -> System.out.println("\n✅ Заказ " + readyOrder.getId() + " готов!"))
+                            .thenAccept(readyOrder -> {
+
+                                System.out.printf("%s%s🎉 [ORDER_COMPLETE] Заказ #%d | Готово блюд: %d | Время: ???%s%n",
+                                        GREEN, time, readyOrder.getId(), readyOrder.getDishesGot().size(), RESET);
+
+                            })
                             .exceptionally(e -> {
-                                System.out.println("\n⛔ Заказ " + order.getId() + " не выполнен: " + e.getMessage());
+
+                                System.out.printf("%s%s⛔ [ORDER_FAILED] Заказ #%d не выполнен: %s%s%n",
+                                        YELLOW, time, order.getId(), e.getMessage(), RESET);
+
                                 return null;
                             });
                 });
@@ -66,6 +87,11 @@ public class OrderService {
     public Order compileOrder(List<Dish> dishes, boolean isVip) {
         Order newOrder = new Order(isVip, dishes);
 
+        String time = LocalDateTime.now().format(TIME_FORMATTER);
+        String vipStatus = isVip ? "да" : "нет";
+        System.out.printf("%s%s📦 [ORDER_CREATED] Заказ #%d | VIP: %s | блюд: %d%s%n",
+                BLUE, time, newOrder.getId(), vipStatus, dishes.size(), RESET);
+
         incomingOrders.add(newOrder);
         return newOrder;
     }
@@ -73,7 +99,9 @@ public class OrderService {
     private Queue<Order> getSnapshot() {
 
         Queue<Order> snapshot = new LinkedList<>();
-        System.out.println("[СИСТЕМА]: ГОТОВИМСЯ К СНИМКУ ОЧЕРЕДИ, ТЕКУЩИЙ РАЗМЕР ОЧЕРЕДИ: " + incomingOrders.size());
+
+        String time = LocalDateTime.now().format(TIME_FORMATTER);
+        System.out.printf("%s%s📸 [SNAPSHOT] Размер очереди: %d%s%n", CYAN, time, incomingOrders.size(), RESET);
 
         int elementsToTake = Math.min(SNAPSHOT_SIZE, incomingOrders.size());
 
@@ -81,7 +109,8 @@ public class OrderService {
             snapshot.add(incomingOrders.poll());
         }
 
-        System.out.println("[СИСТЕМА]: СДЕЛАН СНИМОК ОЧЕРЕДИ - " + snapshot);
+        System.out.printf("%s%s📸 [SNAPSHOT] Взято заказов: %d %s%s%n",
+                CYAN, time, snapshot.size(), snapshot, RESET);
         return snapshot;
     }
 
