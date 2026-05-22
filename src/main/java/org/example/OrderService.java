@@ -51,20 +51,24 @@ public class OrderService {
                 Queue<Order> snapshot = getSnapshot();
 
                 snapshot.forEach(order -> {
-                    kitchenService.acceptOrder(order)
-                            .thenAccept(readyOrder -> {
+                    try {
+                        kitchenService.acceptOrder(order)
+                                .thenAccept(readyOrder -> {
 
-                                System.out.printf("%s%s🎉 [ORDER_COMPLETE] Заказ #%d | Готово блюд: %d | Время: ???%s%n",
-                                        GREEN, time, readyOrder.getId(), readyOrder.getDishesGot().size(), RESET);
+                                    System.out.printf("%s%s🎉 [ORDER_COMPLETE] Заказ #%d | Готово блюд: %d | Время: ???%s%n",
+                                            GREEN, time, readyOrder.getId(), readyOrder.getDishesGot().size(), RESET);
 
-                            })
-                            .exceptionally(e -> {
+                                })
+                                .exceptionally(e -> {
 
-                                System.out.printf("%s%s⛔ [ORDER_FAILED] Заказ #%d не выполнен: %s%s%n",
-                                        YELLOW, time, order.getId(), e.getMessage(), RESET);
+                                    System.out.printf("%s%s⛔ [ORDER_FAILED] Заказ #%d не выполнен: %s%s%n",
+                                            YELLOW, time, order.getId(), e.getMessage(), RESET);
 
-                                return null;
-                            });
+                                    return null;
+                                });
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
                 });
             } catch (Exception e) {
                 System.err.println("Ошибка в шедулере OrderService: " + e.getMessage());

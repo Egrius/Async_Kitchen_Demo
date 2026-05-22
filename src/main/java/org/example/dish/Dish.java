@@ -6,11 +6,11 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 
 public abstract class Dish {
-    private static AtomicInteger counter = new AtomicInteger(0);
-    private final int id;
-    private final String name;
-    private final int cookingTime;
-    private boolean isReady = false;
+    protected static AtomicInteger counter = new AtomicInteger(0);
+    protected final int id;
+    protected final String name;
+    protected final int cookingTime;
+    protected boolean isReady = false;
 
     public Dish(String name, int cookingTime) {
         this.id = counter.incrementAndGet();

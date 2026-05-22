@@ -5,6 +5,7 @@ import org.example.dish.Dessert;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 
 public class DessertTask extends CookingTask<Dessert> {
@@ -14,23 +15,27 @@ public class DessertTask extends CookingTask<Dessert> {
     private static final String GREEN = "\u001B[32m";
     private static final String BLUE = "\u001B[34m";
 
-    public DessertTask(Dessert dish, int orderId, ExecutorService assignedPool, boolean isVip) {
-        super(dish, orderId, assignedPool, isVip);
+    public DessertTask(Dessert dish, int orderId, ExecutorService assignedPool, boolean isVip, CountDownLatch startLatch) {
+        super(dish, orderId, assignedPool, isVip, startLatch);
     }
 
     @Override
     public CompletableFuture<Dessert> start() {
-        isStarted = true;
+        startLatch.countDown();
+        setStarted(true);
         String time = LocalDateTime.now().format(TIME_FORMATTER);
         System.out.printf("%s%s🍰 [DESSERT_START] Заказ #%d | Десерт '%s' id{%d}%s%n",
                 BLUE, time, getOrderId(), getDish().getName(), getDish().getId(), RESET);
         CompletableFuture<Dessert> future = makeDessert(getDish(), getOrderId());
         super.setFuture(future);
+
+        setRunning(true);
+        startLatch.countDown();
+
         return future;
     }
 
     private CompletableFuture<Dessert> makeDessert(Dessert dessert, Integer orderId) {
-        setRunning(true);
         return CompletableFuture.supplyAsync(() -> {
             try {
                 Thread.sleep(1000);

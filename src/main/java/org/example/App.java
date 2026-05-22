@@ -2,6 +2,7 @@ package org.example;
 
 import org.example.dish.Dish;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
@@ -24,7 +25,7 @@ public class App
         List<Thread> threads = new ArrayList<>();
         List<Thread> clientThreads = new ArrayList<>();
 
-        for (int i = 0; i < 8; i++) {
+        for (int i = 0; i < 2; i++) {
 
             try {
                 Thread.sleep(2000);
@@ -35,7 +36,7 @@ public class App
 
             Thread client = new Thread(() -> {
 
-                int dishesCount = random.nextInt(1, 11);
+                int dishesCount = random.nextInt(1, 4);
                 List<Dish> dishes = new ArrayList<>();
 
                 for(int j = 0; j < dishesCount; j++) {
@@ -43,7 +44,7 @@ public class App
                     dishes.add(menuService.selectFromMenu(dish));
                 }
 
-                boolean isVip = Math.random() <= 0.5; // 20% випов
+                boolean isVip = Math.random() <= 0.6;
 
                 Order compiled = orderService.compileOrder(dishes,isVip);
                 System.out.println("\n --------------------\n[ Заказ "
@@ -72,7 +73,7 @@ public class App
             }
         }
 
-        Thread.sleep(30000);
+        Thread.sleep(Duration.ofMinutes(3));
         kitchen.shutdown();
         orderService.shutdown();
     }
