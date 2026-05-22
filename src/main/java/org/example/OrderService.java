@@ -27,7 +27,6 @@ public class OrderService {
                     else return Integer.compare(o1.getId(), o2.getId());
                 });
 
-
     private final KitchenService kitchenService = KitchenService.getInstance();
 
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ofPattern("HH:mm:ss.SSS");

@@ -63,7 +63,6 @@ public class KitchenService {
     /*
     Проблема: связка шедуллера на старт фьючеров и allOf в acceptOrder - нет синхронизации вследствие чего null
      */
-
     private Runnable runCookingTasks() {
         return () -> {
 
@@ -89,7 +88,7 @@ public class KitchenService {
 
             for(Map.Entry<Integer, List<CookingTask<? extends Dish>>> e : runningTasks.entrySet()) {
                 for (CookingTask<?> task : e.getValue()) {
-                    if (!task.isRunning()) {
+                    if (!task.isRunning() && !task.isCancelled()) {
                         if(task.isVip() && task.getDish().getType() == DishType.PIZZA) {
 
                             if(!hasFreeOvenSlot()) {
@@ -106,7 +105,8 @@ public class KitchenService {
                                                     System.out.printf("%s%s⚡ [VIP_PREEMPT] VIP заказ #%d прервал задачу заказа #%d (Пицца '%s')%s%n",
                                                             YELLOW, time, task.getOrderId(), t.getOrderId(), t.getDish().getName(), RESET);
 
-                                                    t.cancel();
+                                                    PizzaTask pizzaTask = (PizzaTask) t;
+                                                    pizzaTask.cancel();
                                                 })
                                                 .findFirst()
                                                 .ifPresent(a -> {
@@ -131,7 +131,8 @@ public class KitchenService {
         };
     }
 
-    // Суть этого метода - сгенерировать задачи и закинуть их в мапу, проверкой статусов и вытеснением уже занимается dispatcher
+    // Суть этого метода - сгенерировать задачи и закинуть их в мапу,
+    // проверкой статусов и вытеснением уже занимается dispatcher
     public CompletableFuture<Order> acceptOrder(Order order) {
 
         String time = LocalDateTime.now().format(TIME_FORMATTER);
