@@ -63,6 +63,7 @@ public class OrderService {
 
                                     System.out.printf("%s%s⛔ [ORDER_FAILED] Заказ #%d не выполнен: %s%s%n",
                                             YELLOW, time, order.getId(), e.getMessage(), RESET);
+                                    e.printStackTrace();
 
                                     return null;
                                 });

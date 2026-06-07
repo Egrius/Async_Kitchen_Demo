@@ -16,7 +16,6 @@ public class Pizza extends Dish {
                 "id=" + id +
                 ", name='" + name + '\'' +
                 ", cookingTime=" + cookingTime +
-                ", isReady=" + isReady +
                 '}';
     }
 

@@ -22,17 +22,17 @@ public class DrinkTask extends CookingTask<Drink> {
     @Override
     public CompletableFuture<Drink> start() {
 
-        setStarted(true);
         String time = LocalDateTime.now().format(TIME_FORMATTER);
         System.out.printf("%s%s🥤 [DRINK_START] Заказ #%d | Напиток '%s' id{%d}%s%n",
                 BLUE, time, getOrderId(), getDish().getName(), getDish().getId(), RESET);
-        CompletableFuture<Drink> future = makeDrink(getDish(), getOrderId());
 
-        setRunning(true);
-        startLatch.countDown();
-        super.setFuture(future);
+        CompletableFuture<Drink> cookingFuture = makeDrink(getDish(), getOrderId());
 
-        return future;
+        signalStarted();
+
+        super.setCookingFuture(cookingFuture);
+
+        return getResultFuture(); // не имеет смысла возвращать, синхрон пойдет по 'горячему' фьючеру
     }
 
     private CompletableFuture<Drink> makeDrink(Drink drink, Integer orderId) {
@@ -40,12 +40,17 @@ public class DrinkTask extends CookingTask<Drink> {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 Thread.sleep(1000);
-                drink.setReady(true);
+
                 String time = LocalDateTime.now().format(TIME_FORMATTER);
                 System.out.printf("%s%s✨ [DRINK_DONE] Заказ #%d | Напиток '%s' id{%d} готов (1 сек)%s%n",
                         GREEN, time, orderId, drink.getName(), drink.getId(), RESET);
+
+                getResultFuture().complete(getDish());
+
                 return drink;
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                getResultFuture().completeExceptionally(e);
                 throw new RuntimeException(e);
             }
         }, getAssignedPool());

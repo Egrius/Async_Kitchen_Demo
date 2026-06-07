@@ -4,6 +4,7 @@ import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
+import org.example.KitchenService;
 import org.example.dish.Dish;
 import org.example.dish.Pizza;
 import org.example.dish.PizzaStage;
@@ -11,8 +12,10 @@ import org.example.dish.PizzaStage;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Getter
 @Setter
@@ -28,25 +31,22 @@ public class PizzaTask extends CookingTask<Pizza> {
     @Override
     public String toString() {
         return "PizzaTask{" +
-                "retries=" + retries +
                 ", PIZZA_FAIL_PERCENT=" + PIZZA_FAIL_PERCENT +
                 ", pizzaStage=" + pizzaStage +
                 ", dish=" + dish +
                 ", orderId=" + orderId +
                 ", isVip=" + isVip +
-                ", isRunning=" + isRunning +
-                ", cancelled=" + cancelled +
-                ", isStarted=" + isStarted +
                 '}';
     }
 
-    private final int retries;
+    private final AtomicInteger remainingRetries;
     private final double PIZZA_FAIL_PERCENT = 0.3;
     private volatile PizzaStage pizzaStage = PizzaStage.NONE;
 
     public PizzaTask(Pizza dish, int orderId, ExecutorService assignedPool, boolean isVip, int retries, CountDownLatch startLatch) {
         super(dish, orderId, assignedPool, isVip, startLatch);
-        this.retries = retries;
+
+        remainingRetries = new AtomicInteger(retries);
     }
 
     @Override
@@ -54,38 +54,39 @@ public class PizzaTask extends CookingTask<Pizza> {
 
         String time = LocalDateTime.now().format(TIME_FORMATTER);
         System.out.printf("%s%s🚀 [PIZZA_START] Заказ #%d | Пицца '%s' id{%d} | Ретри: %d%s%n",
-                BLUE, time, getOrderId(), getDish().getName(), getDish().getId(), retries, RESET);
+                BLUE, time, getOrderId(), getDish().getName(), getDish().getId(), remainingRetries.get(), RESET);
 
-        if (isCancelled()) {
+        if (getTaskState() == TaskState.DISPLACED) {
             System.out.println("ПИЦЦА БЫЛА ОТМЕНЕНА ПЕРЕД СТАРТОМ");
-            return CompletableFuture.completedFuture(getDish());
+            return getResultFuture();
         }
 
-        CompletableFuture<Pizza> future = makePizzaWithRetries(getDish(), retries, getOrderId());
+        CompletableFuture<Pizza> future = makePizzaWithRetries(getDish(), getOrderId());
 
-        super.setFuture(future);
-        setStarted(true);
-        setRunning(true);
-        startLatch.countDown();
+        super.setCookingFuture(future);
 
-        return future;
+        signalStarted();
+
+        return getResultFuture(); // Пока временно, вообще смысла не имеет возвращать что-то
     }
 
     /*
     Продолжить прерваное выполнение
      */
     public CompletableFuture<Pizza> resume() {
-        setCancelled(false);
-        setRunning(true);
+        setTaskState(TaskState.RUNNING);
+
         CompletableFuture<Pizza> resumedFuture;
+
         switch (pizzaStage) {
             case NONE -> resumedFuture = start();
-            case DOUGH -> resumedFuture = prepareDough(getDish(), getOrderId())
-                    .thenCompose(p -> bakePizza(getDish(), getOrderId()));
-            case BAKING -> resumedFuture = bakePizza(getDish(), getOrderId());
+            case DOUGH -> resumedFuture = makePizzaWithRetries(getDish(), getOrderId());
+            case BAKING -> resumedFuture = runFutureTaskAndReturnPizzaResult(bakePizza(getDish(), getOrderId()));
+
             default -> resumedFuture = CompletableFuture.completedFuture(getDish());
         }
-        super.setFuture(resumedFuture);
+        super.setCookingFuture(resumedFuture);
+
         return resumedFuture;
     }
 
@@ -99,49 +100,67 @@ public class PizzaTask extends CookingTask<Pizza> {
             return;
         }
 
-        setRunning(false);
-        setCancelled(true);
+       setTaskState(TaskState.DISPLACED);
 
         String time = LocalDateTime.now().format(TIME_FORMATTER);
         System.out.printf("%s%s⚠️ [PIZZA_CANCEL] Заказ #%d | Пицца '%s' id{%d} | Статус: %s%s%n",
                 YELLOW, time, getOrderId(), getDish().getName(), getDish().getId(), getPizzaStage(), RESET);
     }
 
-    private CompletableFuture<Pizza> makePizzaWithRetries(Pizza pizza, int retriesLeft, Integer orderId) {
-        return prepareDough(pizza, orderId)
-                .thenCompose(v -> bakePizza(pizza, orderId))
-                .exceptionallyCompose(throwable -> {
+    private CompletableFuture<Pizza> runFutureTaskAndReturnPizzaResult(CompletableFuture<Pizza> futureToComplete) {
+        return futureToComplete
+                .exceptionallyCompose((throwable) -> {
 
+                    Pizza pizza = getDish();
                     String time = LocalDateTime.now().format(TIME_FORMATTER);
 
-                    if (throwable.getMessage() != null && throwable.getMessage().contains("подгорела")) {
+                    if (throwable.getMessage() != null && !throwable.getMessage().contains("подгорела")) {
 
-                        System.out.printf("%s%s💀 [BURNT] Заказ #%d | Пицца '%s' id{%d} подгорела | retry: %d осталось%s%n",
-                                RED, time, orderId, pizza.getName(), pizza.getId(), retriesLeft - 1, RESET);
+                        getResultFuture().completeExceptionally(throwable);
+                        return CompletableFuture.failedFuture(throwable);
                     }
 
-                    if (retriesLeft <= 0) {
-                        pizza.setReady(false);
-                        setRunning(false);
+                    int newRetries = remainingRetries.decrementAndGet();
+
+                    System.out.printf("%s%s💀 [BURNT] Заказ #%d | Пицца '%s' id{%d} подгорела | retry: %d осталось%s%n",
+                            RED, time, orderId, pizza.getName(), pizza.getId(), newRetries, RESET);
+                    setPizzaStage(PizzaStage.FIRED);
+
+                    if (newRetries  <= 0) {
+
+                        setTaskState(TaskState.FAILED);
                         pizzaStage = PizzaStage.FAILED;
 
                         System.out.printf("%s%s❌ [PIZZA_FAIL] Заказ #%d | Пиццу '%s' id{%d} не удалось приготовить (ретри закончились)%s%n",
                                 RED, time, orderId, pizza.getName(), pizza.getId(), RESET);
 
-                        throw new RuntimeException("[заказ %d]: 💥 Пиццу '%s' с id{%d} не удалось приготовить".formatted(orderId, pizza.getName(), pizza.getId()));
+                        getResultFuture().completeExceptionally(throwable); // горячий фьючер
+
+                        RuntimeException error = new RuntimeException(
+                                "[заказ %d]: 💥 Пиццу '%s' с id{%d} не удалось приготовить"
+                                        .formatted(orderId, pizza.getName(), pizza.getId()));
+
+                        getResultFuture().completeExceptionally(error);
+                        return CompletableFuture.failedFuture(error);
                     }
 
                     System.out.printf("%s%s🔄 [PIZZA_RETRY] Заказ #%d | Пицца '%s' id{%d} | Повторная попытка (%d осталось)%s%n",
-                            YELLOW, time, orderId, pizza.getName(), pizza.getId(), retriesLeft - 1, RESET);
+                            YELLOW, time, orderId, pizza.getName(), pizza.getId(), newRetries, RESET);
 
-                    return makePizzaWithRetries(pizza, retriesLeft - 1, orderId);
+                    return runFutureTaskAndReturnPizzaResult(bakePizza(pizza, orderId));
+
                 });
+    }
+
+    private CompletableFuture<Pizza> makePizzaWithRetries(Pizza pizza, Integer orderId) {
+        return runFutureTaskAndReturnPizzaResult(
+                prepareDough(pizza, orderId).thenCompose(v -> bakePizza(pizza, orderId)));
     }
 
     private CompletableFuture<Pizza> prepareDough(Pizza pizza, Integer orderId) {
         return CompletableFuture.supplyAsync(() -> {
 
-            if(isCancelled()) {
+            if(getTaskState() == TaskState.DISPLACED) {
 
                 System.out.println("ПРЕРВАНО ПЕРЕД ЗАМЕШИВАНИЕМ ТЕСТА");
                 return pizza;
@@ -157,7 +176,7 @@ public class PizzaTask extends CookingTask<Pizza> {
                 for (int i = 0; i < 2; i++) {
                     Thread.sleep(100);
 
-                    if (isCancelled()) {
+                    if (getTaskState() == TaskState.DISPLACED) {
                         System.out.println("ПРЕРВАНО В ПРОЦЕССЕ ЗАМЕШИВАНИЯ ТЕСТА");
                         return pizza;
                     }
@@ -177,7 +196,7 @@ public class PizzaTask extends CookingTask<Pizza> {
 
         return CompletableFuture.supplyAsync(() -> {
 
-            if(isCancelled()) {
+            if(getTaskState() == TaskState.DISPLACED) {
                 System.out.println("ПРЕРВАНО ПЕРЕД ВЫПЕКАНИЕМ ПИЦЦЫ");
                 return pizza;
             }
@@ -192,7 +211,7 @@ public class PizzaTask extends CookingTask<Pizza> {
                 for (int i = 0; i < 2; i++) {
                     Thread.sleep(200);
 
-                    if (isCancelled()) {
+                    if (getTaskState() == TaskState.DISPLACED) {
                         System.out.println("ПРЕРВАНО В ПРОЦЕССЕ ВЫПЕКАНИЯ ПИЦЦЫ (БУКВАЛЬНО ДОСТАЛИ ИЗ ПЕЧКИ)");
                         return pizza;
                     }
@@ -200,8 +219,10 @@ public class PizzaTask extends CookingTask<Pizza> {
 
                 if (Math.random() <= PIZZA_FAIL_PERCENT) {
                     pizzaStage = PizzaStage.FIRED;
+
                     System.out.printf("%s%s💀 [BURNT] Заказ #%d | Пицца '%s' id{%d} подгорела в печи!%s%n",
                             RED, time, orderId, pizza.getName(), pizza.getId(), RESET);
+
                     throw new RuntimeException("[заказ %d]: ❌ Пицца '%s', id{%d} подгорела".formatted(orderId, pizza.getName(), pizza.getId()));
                 }
 
@@ -211,16 +232,14 @@ public class PizzaTask extends CookingTask<Pizza> {
                 throw new RuntimeException(e);
             }
 
-            pizza.setReady(true);
             pizzaStage = PizzaStage.DONE;
-
-            System.out.printf("%s%s✨ [BAKE_DONE] Заказ #%d | Пицца '%s' id{%d} | Готово! (2 сек)%s%n",
+            setTaskState(TaskState.COMPLETED);
+            System.out.printf("%s%s✨ [BAKE_DONE] Заказ #%d | Пицца '%s' id{%d} | Готово!%s%n",
                     GREEN, time, orderId, pizza.getName(), pizza.getId(), RESET);
 
+            getResultFuture().complete(pizza); // событие готовности
 
-            setRunning(false);
             return pizza;
         }, getAssignedPool());
     }
-
 }

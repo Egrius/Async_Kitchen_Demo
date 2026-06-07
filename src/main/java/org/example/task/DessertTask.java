@@ -21,30 +21,33 @@ public class DessertTask extends CookingTask<Dessert> {
 
     @Override
     public CompletableFuture<Dessert> start() {
-        startLatch.countDown();
-        setStarted(true);
+
         String time = LocalDateTime.now().format(TIME_FORMATTER);
         System.out.printf("%s%s🍰 [DESSERT_START] Заказ #%d | Десерт '%s' id{%d}%s%n",
                 BLUE, time, getOrderId(), getDish().getName(), getDish().getId(), RESET);
-        CompletableFuture<Dessert> future = makeDessert(getDish(), getOrderId());
-        super.setFuture(future);
 
-        setRunning(true);
-        startLatch.countDown();
+        CompletableFuture<Dessert> cookingFuture = makeDessert(getDish(), getOrderId());
+        super.setCookingFuture(cookingFuture);
 
-        return future;
+        signalStarted();
+
+        return getResultFuture();
     }
 
     private CompletableFuture<Dessert> makeDessert(Dessert dessert, Integer orderId) {
         return CompletableFuture.supplyAsync(() -> {
             try {
                 Thread.sleep(1000);
-                dessert.setReady(true);
+
                 String time = LocalDateTime.now().format(TIME_FORMATTER);
                 System.out.printf("%s%s✨ [DESSERT_DONE] Заказ #%d | Десерт '%s' id{%d} готов (1 сек)%s%n",
                         GREEN, time, orderId, dessert.getName(), dessert.getId(), RESET);
+
+                getResultFuture().complete(getDish());
                 return dessert;
             } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                getResultFuture().completeExceptionally(e);
                 throw new RuntimeException(e);
             }
         }, getAssignedPool());

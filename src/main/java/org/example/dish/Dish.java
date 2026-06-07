@@ -10,7 +10,6 @@ public abstract class Dish {
     protected final int id;
     protected final String name;
     protected final int cookingTime;
-    protected boolean isReady = false;
 
     public Dish(String name, int cookingTime) {
         this.id = counter.incrementAndGet();
@@ -34,13 +33,5 @@ public abstract class Dish {
 
     public int getCookingTime() {
         return cookingTime;
-    }
-
-    public void setReady(boolean ready) {
-        isReady = ready;
-    }
-
-    public boolean isReady() {
-        return isReady;
     }
 }

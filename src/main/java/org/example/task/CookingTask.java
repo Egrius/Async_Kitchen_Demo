@@ -14,17 +14,20 @@ import java.util.concurrent.ExecutorService;
  */
 @Getter
 @Setter
-@ToString(exclude = {"future", "assignedPool"})
+@ToString(exclude = {"cookingFuture", "assignedPool"})
 public abstract class CookingTask <T extends Dish> {
-    protected final T dish;
     protected final int orderId;
-    private final ExecutorService assignedPool;
     protected final boolean isVip;
-    private volatile CompletableFuture<T> future;
-    protected volatile boolean isRunning;
-    protected volatile boolean cancelled;
-    protected volatile boolean isStarted;
-    protected final CountDownLatch startLatch;
+    protected final T dish;
+
+    private final ExecutorService assignedPool;
+
+    private volatile CompletableFuture<T> cookingFuture;
+    private CompletableFuture<T> resultFuture;
+
+    private final CountDownLatch startLatch;
+
+    private volatile TaskState taskState;
 
     public CookingTask(T dish, int orderId, ExecutorService assignedPool, boolean isVip, CountDownLatch startLatch) {
         this.dish = dish;
@@ -32,6 +35,10 @@ public abstract class CookingTask <T extends Dish> {
         this.assignedPool = assignedPool;
         this.isVip = isVip;
         this.startLatch = startLatch;
+        taskState = TaskState.CREATED;
+
+        resultFuture = new CompletableFuture<>();
+
     }
 
     public abstract CompletableFuture<T> start(); // здесь создается future и запускается задача

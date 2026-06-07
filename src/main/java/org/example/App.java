@@ -25,14 +25,8 @@ public class App
         List<Thread> threads = new ArrayList<>();
         List<Thread> clientThreads = new ArrayList<>();
 
-        for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 20; i++) {
 
-            try {
-                Thread.sleep(2000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
-            }
 
             Thread client = new Thread(() -> {
 
@@ -44,7 +38,7 @@ public class App
                     dishes.add(menuService.selectFromMenu(dish));
                 }
 
-                boolean isVip = Math.random() <= 0.6;
+                boolean isVip = Math.random() <= 0.5;
 
                 Order compiled = orderService.compileOrder(dishes,isVip);
                 System.out.println("\n --------------------\n[ Заказ "
@@ -52,7 +46,7 @@ public class App
                         + "): \n" + compiled.getDishesOrdered()
                         + "\n --------------------\n ");
                 try {
-                    Thread.sleep(2000);
+                    Thread.sleep(1000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException(e);
