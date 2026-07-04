@@ -11,7 +11,6 @@ import java.util.Random;
 Проблемы, которые были:
 
 - Шедуллер orderService вызывался только один раз, возможная причина - жесткое ограничение очереди в 5 элементов - клались null
-
  */
 
 public class App 
@@ -51,7 +50,6 @@ public class App
                     Thread.currentThread().interrupt();
                     throw new RuntimeException(e);
                 }
-
             });
             threads.add(client);
             client.start();

@@ -2,21 +2,43 @@ package org.example.task;
 
 import lombok.Getter;
 import lombok.Setter;
-import lombok.ToString;
-import lombok.extern.slf4j.Slf4j;
 import org.example.KitchenService;
-import org.example.dish.Dish;
 import org.example.dish.Pizza;
 import org.example.dish.PizzaStage;
 
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionStage;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Задача приготовления пиццы с поддержкой повторных попыток (retries) и вытеснения VIP-заказами.
+ *
+ * <p><b>Жизненный цикл:</b>
+ * <pre>
+ * {@link PizzaStage#NONE} → {@link PizzaStage#DOUGH} → {@link PizzaStage#BAKING} → {@link PizzaStage#DONE}
+ *                                  ↓                        ↓
+ *                          (при прерывании)         (при подгорании)
+ *                                  ↓                        ↓
+ *                          сохраняем DOUGH           {@link PizzaStage#FIRED}
+ *                                  ↓
+ *                           в recoveryQueue         повторная попытка
+ *                                                   (пока есть {@link #remainingRetries})
+ * </pre>
+ *
+ * <p><b>Вероятность подгорания:</b> {@value #PIZZA_FAIL_PERCENT} (30%)
+ *
+ * <p><b>Механизм вытеснения:</b> При занятости всех печей VIP-заказ может прервать
+ * обычную задачу. Прерванная задача переводится в состояние {@link TaskState#DISPLACED},
+ * сохраняет текущий этап приготовления в {@link #pizzaStage} и помещается в
+ * {@link KitchenService#recoveryQueue} для последующего восстановления.
+ *
+ * @author Egrius
+ * @see KitchenService
+ * @see PizzaStage
+ * @see CookingTask
+ */
 @Getter
 @Setter
 public class PizzaTask extends CookingTask<Pizza> {
@@ -28,27 +50,56 @@ public class PizzaTask extends CookingTask<Pizza> {
     private static final String YELLOW = "\u001B[33m";
     private static final String BLUE = "\u001B[34m";
 
-    @Override
-    public String toString() {
-        return "PizzaTask{" +
-                ", PIZZA_FAIL_PERCENT=" + PIZZA_FAIL_PERCENT +
-                ", pizzaStage=" + pizzaStage +
-                ", dish=" + dish +
-                ", orderId=" + orderId +
-                ", isVip=" + isVip +
-                '}';
-    }
-
+    /**
+     * Оставшееся количество попыток приготовления.
+     */
     private final AtomicInteger remainingRetries;
+
+    /**
+     * Вероятность того, что пицца подгорит при выпечке.
+     * <p>Значение: {@value #PIZZA_FAIL_PERCENT} (30%)
+     */
     private final double PIZZA_FAIL_PERCENT = 0.3;
+
+    /**
+     * Текущий этап приготовления пиццы.
+     * <p>Используется для восстановления после вытеснения VIP-заказом.
+     */
     private volatile PizzaStage pizzaStage = PizzaStage.NONE;
 
-    public PizzaTask(Pizza dish, int orderId, ExecutorService assignedPool, boolean isVip, int retries, CountDownLatch startLatch) {
-        super(dish, orderId, assignedPool, isVip, startLatch);
+    /**
+     * Конструктор задачи приготовления пиццы.
+     *
+     * @param dish          объект пиццы для приготовления
+     * @param orderId       идентификатор заказа
+     * @param assignedPool  пул потоков для выполнения (печь)
+     * @param isVip         флаг VIP-заказа (может вытеснять обычные)
+     * @param retries       максимальное количество повторных попыток при подгорании
+     */
+    public PizzaTask(Pizza dish, int orderId, ExecutorService assignedPool, boolean isVip, int retries) {
+        super(dish, orderId, assignedPool, isVip);
 
         remainingRetries = new AtomicInteger(retries);
     }
 
+
+    /**
+     * Запускает процесс приготовления пиццы.
+     *
+     * <p><b>Поток выполнения:</b>
+     * <ol>
+     *   <li>Проверяет, не была ли задача вытеснена до старта</li>
+     *   <li>Запускает асинхронную цепочку: подготовка теста → выпечка с ретраями</li>
+     *   <li>Сохраняет {@code cookingFuture} для управления через {@code KitchenService}</li>
+     *   <li>Сигнализирует через {@code startLatch} о начале выполнения</li>
+     * </ol>
+     *
+     * @return {@code CompletableFuture}, который завершится:
+     *         <ul>
+     *           <li>успешно — с готовой {@link Pizza}</li>
+     *           <li>с ошибкой — после исчерпания всех попыток</li>
+     *         </ul>
+     */
     @Override
     public CompletableFuture<Pizza> start() {
 
@@ -65,15 +116,25 @@ public class PizzaTask extends CookingTask<Pizza> {
 
         super.setCookingFuture(future);
 
-        signalStarted();
 
         return getResultFuture(); // Пока временно, вообще смысла не имеет возвращать что-то
     }
 
-    /*
-    Продолжить прерваное выполнение
+    /**
+     * Восстанавливает выполнение прерванной задачи.
+     *
+     * <p>В зависимости от сохранённого {@link #pizzaStage}:
+     * <ul>
+     *   <li>{@code NONE} — запуск с начала</li>
+     *   <li>{@code DOUGH} — повторная подготовка теста (безопасно, т.к. тесто не начато)</li>
+     *   <li>{@code BAKING} — продолжение выпечки (с того же места)</li>
+     *   <li>{@code DONE}/{@code FAILED} — завершённые задачи не восстанавливаются</li>
+     * </ul>
+     *
+     * @return {@code CompletableFuture} восстановленного процесса приготовления
      */
     public CompletableFuture<Pizza> resume() {
+
         setTaskState(TaskState.RUNNING);
 
         CompletableFuture<Pizza> resumedFuture;
@@ -92,10 +153,25 @@ public class PizzaTask extends CookingTask<Pizza> {
 
     /*
     Метод отмены, для того чтобы освободить под випа.
-    Суть: установить флаг отмены для кооперативного вытеснения. Future.cancel() не подходит под данную задачу.
+    Суть: установить флаг отмены для кооперативного вытеснения.
+
+    !!! Future.cancel() не подходит под данную задачу.
+     */
+
+    /**
+     * Прерывает выполнение задачи для освобождения ресурсов под VIP-заказ.
+     *
+     * <p><b>Важно:</b> Используется {@link TaskState#DISPLACED} вместо
+     * {@code Future.cancel()}, так как последний не позволяет сохранить
+     * промежуточное состояние ({@link #pizzaStage}) для последующего восстановления.
+     *
+     * <p>Задача не прерывается принудительно, а лишь устанавливает флаг,
+     * который проверяется в точках кооперативной многозадачности
+     * (методы {@link #prepareDough} и {@link #bakePizza}).
      */
     public void cancel() {
 
+        // Если пицца уже готова, то ничего не менять
         if (pizzaStage == PizzaStage.DONE) {
             return;
         }
@@ -107,25 +183,50 @@ public class PizzaTask extends CookingTask<Pizza> {
                 YELLOW, time, getOrderId(), getDish().getName(), getDish().getId(), getPizzaStage(), RESET);
     }
 
+    /**
+     * Обрабатывает подгорание пиццы и управляет повторными попытками.
+     *
+     * <p><b>Алгоритм работы:</b>
+     * <ol>
+     *   <li>При получении ошибки проверяет, связана ли она с подгоранием</li>
+     *   <li>Уменьшает счётчик {@link #remainingRetries}</li>
+     *   <li>Если попытки есть — рекурсивно запускает выпечку заново</li>
+     *   <li>Если попыток не осталось — переводит задачу в состояние {@code FAILED}</li>
+     * </ol>
+     *
+     * @param futureToComplete метод этапа приготовления (ожидается, что может выбросить
+     *                         {@code RuntimeException} с сообщением, содержащим "подгорела")
+     * @return {@code CompletableFuture} с конечным статусом приготовления пиццы
+     */
     private CompletableFuture<Pizza> runFutureTaskAndReturnPizzaResult(CompletableFuture<Pizza> futureToComplete) {
         return futureToComplete
                 .exceptionallyCompose((throwable) -> {
 
-                    Pizza pizza = getDish();
-                    String time = LocalDateTime.now().format(TIME_FORMATTER);
-
-                    if (throwable.getMessage() != null && !throwable.getMessage().contains("подгорела")) {
-
-                        getResultFuture().completeExceptionally(throwable);
+                    // Если задача уже провалена, то вернуть конечный статус
+                    if (getTaskState() == TaskState.FAILED) {
                         return CompletableFuture.failedFuture(throwable);
                     }
 
+                    Pizza pizza = getDish();
+                    String time = LocalDateTime.now().format(TIME_FORMATTER);
+
+                    // Если ошибка не представляет собой подгорание пиццы, то вернуть завершённый данной ошибкой CompletableFuture
+                    if (throwable.getMessage() != null && !throwable.getMessage().contains("подгорела")) {
+
+                        // Завершение главного фьючера, по которому ожидается задача
+                        getResultFuture().completeExceptionally(throwable);
+                        // Возврат завершенного данной ошибкой CompletableFuture
+                        return CompletableFuture.failedFuture(throwable);
+                    }
+
+                    // Получение оставшихся попыток (вычитаем, т.к. попадание сюда уже и есть следующая попытка)
                     int newRetries = remainingRetries.decrementAndGet();
 
                     System.out.printf("%s%s💀 [BURNT] Заказ #%d | Пицца '%s' id{%d} подгорела | retry: %d осталось%s%n",
                             RED, time, orderId, pizza.getName(), pizza.getId(), newRetries, RESET);
                     setPizzaStage(PizzaStage.FIRED);
 
+                    // Если не осталось попыток
                     if (newRetries  <= 0) {
 
                         setTaskState(TaskState.FAILED);
@@ -134,38 +235,61 @@ public class PizzaTask extends CookingTask<Pizza> {
                         System.out.printf("%s%s❌ [PIZZA_FAIL] Заказ #%d | Пиццу '%s' id{%d} не удалось приготовить (ретри закончились)%s%n",
                                 RED, time, orderId, pizza.getName(), pizza.getId(), RESET);
 
-                        getResultFuture().completeExceptionally(throwable); // горячий фьючер
-
                         RuntimeException error = new RuntimeException(
                                 "[заказ %d]: 💥 Пиццу '%s' с id{%d} не удалось приготовить"
                                         .formatted(orderId, pizza.getName(), pizza.getId()));
 
+                        // Завершение главного фьючера, по которому ожидается задача
                         getResultFuture().completeExceptionally(error);
+
+                        // Возврат CompletableFuture, завершённого неудачно
                         return CompletableFuture.failedFuture(error);
                     }
 
                     System.out.printf("%s%s🔄 [PIZZA_RETRY] Заказ #%d | Пицца '%s' id{%d} | Повторная попытка (%d осталось)%s%n",
                             YELLOW, time, orderId, pizza.getName(), pizza.getId(), newRetries, RESET);
 
+                    // Если остались попытки, то рекурсивно вызвать приготовление ещё раз и обработать рекурсивный результат.
                     return runFutureTaskAndReturnPizzaResult(bakePizza(pizza, orderId));
-
                 });
     }
 
+    /**
+     * Запускает полный цикл приготовления пиццы с поддержкой повторных попыток.
+     *
+     * @param pizza   пицца для приготовления
+     * @param orderId идентификатор заказа
+     * @return {@code CompletableFuture} с результатом приготовления
+     * @see #prepareDough(Pizza, Integer)
+     * @see #bakePizza(Pizza, Integer)
+     */
     private CompletableFuture<Pizza> makePizzaWithRetries(Pizza pizza, Integer orderId) {
         return runFutureTaskAndReturnPizzaResult(
                 prepareDough(pizza, orderId).thenCompose(v -> bakePizza(pizza, orderId)));
     }
 
+    /**
+     * Выполняет этап замеса теста.
+     *
+     * <p>Имитирует работу с задержкой 2×100 мс. В процессе выполнения
+     * периодически проверяет флаг прерывания {@link TaskState#DISPLACED}.
+     *
+     * @param pizza   пицца для приготовления
+     * @param orderId идентификатор заказа
+     * @return {@code CompletableFuture} с пиццей после завершения замеса теста
+     */
     private CompletableFuture<Pizza> prepareDough(Pizza pizza, Integer orderId) {
         return CompletableFuture.supplyAsync(() -> {
 
+            /*
+            Если задачу прервали, то вернуть пиццу с её текущим статусом и не продолжать дальше
+            */
             if(getTaskState() == TaskState.DISPLACED) {
-
                 System.out.println("ПРЕРВАНО ПЕРЕД ЗАМЕШИВАНИЕМ ТЕСТА");
                 return pizza;
             }
 
+            // Установили статус замешивания теста
             pizzaStage = PizzaStage.DOUGH;
 
             String time = LocalDateTime.now().format(TIME_FORMATTER);
@@ -173,9 +297,11 @@ public class PizzaTask extends CookingTask<Pizza> {
                     BLUE, time, orderId, pizza.getName(), pizza.getId(), RESET);
 
             try {
+                // Имитация замеса теста.
                 for (int i = 0; i < 2; i++) {
                     Thread.sleep(100);
 
+                    // Проверка статуса на прерывание (задача была смещена VIP-задачей)
                     if (getTaskState() == TaskState.DISPLACED) {
                         System.out.println("ПРЕРВАНО В ПРОЦЕССЕ ЗАМЕШИВАНИЯ ТЕСТА");
                         return pizza;
@@ -186,16 +312,34 @@ public class PizzaTask extends CookingTask<Pizza> {
                 cancel(); // Для уверенности
                 return pizza;
             }
+
             System.out.printf("%s%s✅ [DOUGH_DONE] Заказ #%d | Пицца '%s' id{%d} | Тесто готово (1 сек)%s%n",
                     GREEN, time, orderId, pizza.getName(), pizza.getId(), RESET);
+
             return pizza;
         });
     }
 
+    /**
+     * Выполняет этап выпекания пиццы.
+     *
+     * <p>Имитирует работу с задержкой 2×200 мс. С вероятностью
+     * {@value #PIZZA_FAIL_PERCENT} генерирует ошибку подгорания.
+     *
+     * <p><b>Важно:</b> При подгорании вызывает {@code getResultFuture().completeExceptionally()}
+     * для немедленного оповещения ожидающих потоков (например, {@code KitchenService.acceptOrder()}).
+     *
+     * @param pizza   пицца для приготовления
+     * @param orderId идентификатор заказа
+     * @return {@code CompletableFuture} с приготовленной пиццей или ошибкой подгорания
+     */
     private CompletableFuture<Pizza> bakePizza(Pizza pizza, Integer orderId) {
 
         return CompletableFuture.supplyAsync(() -> {
 
+            /*
+            Если задачу прервали, то вернуть пиццу с её текущим статусом и не продолжать дальше
+            */
             if(getTaskState() == TaskState.DISPLACED) {
                 System.out.println("ПРЕРВАНО ПЕРЕД ВЫПЕКАНИЕМ ПИЦЦЫ");
                 return pizza;
@@ -223,7 +367,14 @@ public class PizzaTask extends CookingTask<Pizza> {
                     System.out.printf("%s%s💀 [BURNT] Заказ #%d | Пицца '%s' id{%d} подгорела в печи!%s%n",
                             RED, time, orderId, pizza.getName(), pizza.getId(), RESET);
 
-                    throw new RuntimeException("[заказ %d]: ❌ Пицца '%s', id{%d} подгорела".formatted(orderId, pizza.getName(), pizza.getId()));
+                    RuntimeException error = new RuntimeException(
+                            "[заказ %d]: ❌ Пицца '%s', id{%d} подгорела"
+                                    .formatted(orderId, pizza.getName(), pizza.getId()));
+
+                    // !!! Была проблема, что даже после того как заказ был уже провален, отсюда всё равно кидалось исключение.
+                    // !!! Так понял что потому что не завершал результирующий фьючер
+                    getResultFuture().completeExceptionally(error);
+                    throw error;
                 }
 
             } catch (InterruptedException e) {
@@ -241,5 +392,19 @@ public class PizzaTask extends CookingTask<Pizza> {
 
             return pizza;
         }, getAssignedPool());
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    @Override
+    public String toString() {
+        return "PizzaTask{" +
+                ", PIZZA_FAIL_PERCENT=" + PIZZA_FAIL_PERCENT +
+                ", pizzaStage=" + pizzaStage +
+                ", dish=" + dish +
+                ", orderId=" + orderId +
+                ", isVip=" + isVip +
+                '}';
     }
 }
