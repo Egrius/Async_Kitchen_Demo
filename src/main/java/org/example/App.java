@@ -1,13 +1,18 @@
 package org.example;
 
+import org.example.dish.Dish;
+
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
 
-/**
- * Hello world!
- *
+/*
+Проблемы, которые были:
+
+- Шедуллер orderService вызывался только один раз, возможная причина - жесткое ограничение очереди в 5 элементов - клались null
  */
+
 public class App 
 {
     public static void main( String[] args ) throws InterruptedException {
@@ -19,18 +24,12 @@ public class App
         List<Thread> threads = new ArrayList<>();
         List<Thread> clientThreads = new ArrayList<>();
 
-        for (int i = 0; i < 10; i++) {
+        for (int i = 0; i < 20; i++) {
 
-            try {
-                Thread.sleep(2000);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
-            }
 
             Thread client = new Thread(() -> {
 
-                int dishesCount = random.nextInt(1, 11);
+                int dishesCount = random.nextInt(1, 4);
                 List<Dish> dishes = new ArrayList<>();
 
                 for(int j = 0; j < dishesCount; j++) {
@@ -38,7 +37,7 @@ public class App
                     dishes.add(menuService.selectFromMenu(dish));
                 }
 
-                boolean isVip = Math.random() <= 0.2; // 20% випов
+                boolean isVip = Math.random() <= 0.5;
 
                 Order compiled = orderService.compileOrder(dishes,isVip);
                 System.out.println("\n --------------------\n[ Заказ "
@@ -46,12 +45,11 @@ public class App
                         + "): \n" + compiled.getDishesOrdered()
                         + "\n --------------------\n ");
                 try {
-                    Thread.sleep(2000);
+                    Thread.sleep(1000);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException(e);
                 }
-
             });
             threads.add(client);
             client.start();
@@ -67,10 +65,8 @@ public class App
             }
         }
 
-        Thread.sleep(30000);
+        Thread.sleep(Duration.ofMinutes(3));
         kitchen.shutdown();
         orderService.shutdown();
-
-
     }
 }

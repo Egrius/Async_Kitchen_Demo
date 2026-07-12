@@ -1,6 +1,11 @@
 package org.example;
 
 
+import org.example.dish.Dessert;
+import org.example.dish.Dish;
+import org.example.dish.Drink;
+import org.example.dish.Pizza;
+
 import java.util.Map;
 
 public class MenuService {
@@ -32,13 +37,14 @@ public class MenuService {
             int cookingTime;
 
             switch (dishType){
-                case PIZZA -> cookingTime = 3;
-                case DESSERT -> cookingTime = 2;
-                case DRINK -> cookingTime = 1;
-                default -> cookingTime = -1;
+                case PIZZA  ->  {return new Pizza(dishName); }
+                case DESSERT ->   {return new Dessert(dishName); }
+                case DRINK -> {return new Drink(dishName); }
+                default -> {
+                    return null;
+                }
             }
 
-            return new Dish(dishType, dishName, cookingTime);
         }
         return null;
     }
